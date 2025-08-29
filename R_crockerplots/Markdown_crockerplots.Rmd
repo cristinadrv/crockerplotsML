@@ -1,0 +1,502 @@
+---
+title: "Crocker_plots"
+output: html_document
+date: "2025-06-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Cargamos librerias
+```{r pressure, echo=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(TDA)
+library(plotly)
+```
+
+ ### CROCKER PLOTS
+
+Cargamos las funciones
+
+```{r, warning= FALSE}
+setwd("C:/Users/croca/OneDrive/Escritorio/master/TFM_project/TFM_project/TFM/crocker-plots/")
+source("./funciones_cp.R")
+
+
+```
+
+## Definimos variables
+```{r echo=FALSE, warning=FALSE}
+#Marco del cuadrado de estudio
+longX <- 2 
+longY <- 2
+
+L <- 2.5 #Longitud de los intervalos temporales
+mymaxscale <- 0.35 #Escala máxima para el parámetro de la filtración
+numepsilon <- 50   #max de num epsilon para calcular los num de betti
+
+```
+
+# Obtener los datos (estan ya descargados en una carpeta)
+```{r}
+ruta <-  "C:/Users/croca/OneDrive/Escritorio/master/TFM_project/TFM_project/TFM/Am66"
+lista_archivos <- list.files(path = ruta, pattern = "20170505_.*", full.names = FALSE)
+
+#guardamos todas las simulaciones en un dataframe
+data_archivos_total <- creacion_df_total_simulaciones(lista_archivos)
+
+#guardamos
+ubicacion <- "C:/Users/croca/OneDrive/Escritorio/master/TFM_project/TFM_project/TFM/dataframes/data_todas_simulaciones.rds"
+saveRDS(data_archivos_total, ubicacion)
+
+```
+
+## Descargamos datos directamente
+
+```{r}
+ubicacion <- "C:/Users/croca/OneDrive/Escritorio/master/TFM_project/TFM_project/TFM/dataframes/data_todas_simulaciones.rds"
+
+data_archivos_total <- readRDS(ubicacion)
+
+#delimitamos en un cuadrado
+data_archivos_total_delimitado <- individuos_cuadrado_df(data_archivos_total,longX,longY)
+
+data_archivos_total_delimitado <- data_archivos_total_delimitado %>% 
+  mutate(empujando = ifelse(substr(id,3,4) == '01','si','no')) %>% 
+  mutate(obstaculo = ifelse(substr(id, 1, 2) != '00','si','no'))
+
+#quitamos los obstaculos
+
+data_empujando <- data_archivos_total_delimitado %>% 
+   filter(empujando == 'si',obstaculo == 'no')
+
+data_sin_empujar <- data_archivos_total_delimitado %>% 
+   filter(empujando == 'no',obstaculo == 'no')
+```
+
+#Aplicamos la homología persistente y calculamos los números de betti (ej una ev)
+
+```{r}
+num_ev <- '000102'
+data <- data_archivos_total_delimitado %>% filter(id == num_ev)
+
+```
+
+## Calculo homologia persistente
+Calculamos la homologia persistente por un epsilon maximo, sacamos un data frame con cada tiempo y el intervalo de nacimiento y muerte de los diagramas de persistencia
+
+```{r echo=FALSE, warning=FALSE}
+
+frames <- unique(data$Num_fotogramas)
+
+#cogemos muestra reducida
+salto <- 5 
+interval_time <- frames[seq(1, length(frames), by = salto)]
+
+homologydata <- data.frame(t = numeric(0), dimension = numeric(0), birth = numeric(0), death = numeric(0))
+
+for (time in interval_time){
+  mydata <- data %>% 
+    filter(Num_fotogramas == time) %>% 
+    dplyr::select(X,Y)
+  
+  
+  newdata <- getIntervals(mydata, L, mymaxdimension = 1, mymaxscale,time)
+  homologydata <- rbind(homologydata,newdata)
+}
+
+homologydata
+
+```
+# Calculo de las curvas de Betti
+A través de un data frame con la homologia persistente, se cuenta el numero de intervalos vivos que hay en cada epsilon
+```{r echo=FALSE, warning=FALSE}
+
+# Crear Betti Data
+griddata <- turnIntervalsIntoGrid(homologydata, numepsilon,mymaxscale)
+
+betti_0 <- griddata %>%
+  filter(dimension == 0) %>% 
+  dplyr::select(-c(dimension)) %>% 
+  pivot_wider(
+    names_from = t,
+    values_from = betticount
+  )
+betti_0 <- betti_0[,-1]
+
+betti_1 <- griddata %>%
+  filter(dimension == 1) %>% 
+  dplyr::select(-c(dimension)) %>% 
+  pivot_wider(
+    names_from = t,
+    values_from = betticount
+  )
+betti_1 <- betti_1[,-1]
+
+betti_euler <- betti_0 - betti_1
+
+betti <- bind_rows(betti_0,betti_1)
+```
+
+#Matriz grafica de Betti
+```{r}
+matrizBetti(griddata,0,mymaxscale)
+matrizBetti(griddata,1,mymaxscale)
+
+```
+### visualizacion
+Dim 0 mide el numero de componentes connexas.
+Dim 1 compara agujeros.
+Calcula curvas de nivel a partir de la variable betticount. Level son los contornos.
+```{r echo=FALSE, warning=FALSE}
+
+crockerplot_grafic(griddata,0,mymaxscale)  
+crockerplot_grafic(griddata,1,mymaxscale)
+
+```
+# PARA DESCARGAR MATRICES:
+
+## PARA 4 SEGUNDOS
+
+## cogemos las matrices de las dos clases por separado. Determinamos el intervalo de frames (100 frames=4 segundos) que se quiere estudiar con saltos de 5 frames, equivalente a un total de 20 frames. Se va corriendo el intervalo frame por frame.
+
+```{r}
+num_frames <- 100  #intervalo de frames
+salto <- 5
+
+## SIN EMPUJAR 
+
+ #seleccionamos las evacuaciones
+num_id <- head(unique(data_sin_empujar$id), 3)  #cogemos solo 3
+
+
+for (ev in num_id){
+  print(ev)
+  
+  data <- data_archivos_total_delimitado %>% filter(id == ev)
+  
+  lista_df <- datas_consecutivos(data,num_frames) #recogemos los frames de nuestro intervalo
+  
+  #homologia persistente
+  
+  for (i in 1:length(lista_df)){
+    print(i)
+    data <- lista_df[[i]]
+    frames <- unique(data$Num_fotogramas)
+    
+    #cogemos muestra reducida
+    interval_time <- frames[seq(1, length(frames), by = salto)]
+    
+    homologydata <- data.frame(t = numeric(0), dimension = numeric(0), birth = numeric(0), death = numeric(0))
+      
+    for (time in interval_time){
+      mydata <- data %>% 
+      filter(Num_fotogramas == time) %>% 
+      dplyr::select(X,Y)
+    
+      newdata <- getIntervals(mydata, L, mymaxdimension = 1, mymaxscale,time)
+      homologydata <- rbind(homologydata,newdata)
+    }
+    
+    # Crear Betti Data
+    griddata <- turnIntervalsIntoGrid(homologydata, numepsilon,mymaxscale)
+    
+      #creamos los 4 tipos de las matrices de betti: b1, b0, b1 y b0 y carcteristica de euler
+    betti_0 <- griddata %>%
+    filter(dimension == 0) %>% 
+    dplyr::select(-c(dimension)) %>% 
+    pivot_wider(
+      names_from = t,
+      values_from = betticount
+    )
+    betti_0 <- betti_0[,-1]
+    
+  betti_1 <- griddata %>%
+    filter(dimension == 1) %>% 
+    dplyr:: select(-c(dimension)) %>% 
+    pivot_wider(
+      names_from = t,
+      values_from = betticount
+    )
+  
+    betti_1 <- betti_1[,-1]
+  
+    betti <- bind_rows(betti_0,betti_1)
+
+    betti_euler <- betti_0 - betti_1
+    
+    #guardamos las matrices de betti
+    
+    ruta_m1 <- "C:/Users/croca/OneDrive/Escritorio/b1_sin_empujar_100/"
+    ruta_m0 <- "C:/Users/croca/OneDrive/Escritorio/b0_sin_empujar_100/"
+    ruta_me <- "C:/Users/croca/OneDrive/Escritorio/euler_sin_empujar_100/"
+    ruta_m <- "C:/Users/croca/OneDrive/Escritorio/b_sin_empujar_100/"
+
+    #creamos las carpetas donde guardaremos las matrices
+    rutas <- c(ruta_m1,ruta_m0,ruta_me,ruta_m)
+
+    for (ruta in rutas) {
+      if (!dir.exists(ruta)) {
+        dir.create(ruta, recursive = TRUE)
+      }
+    }
+    
+    write.csv(betti_0, paste0(ruta_m0,"mb0_",ev,"_",i,".csv"), row.names = FALSE)
+    write.csv(betti_1, paste0(ruta_m1,"mb1_",ev,"_",i,".csv"), row.names = FALSE)
+    write.csv(betti_euler, paste0(ruta_me,"mbe_",ev,"_",i,".csv"), row.names = FALSE)
+    write.csv(betti, paste0(ruta_m,"mb_",ev,"_",i,".csv"), row.names = FALSE)
+}
+}
+
+## EMPUJANDO
+num_id <- head(unique(data_empujando$id), 3)  
+
+for (ev in num_id){
+  print(ev)
+  
+  data <- data_archivos_total_delimitado %>% filter(id == ev)
+  
+  lista_df <- datas_consecutivos(data,num_frames) #recogemos los frames de nuestro intervalo
+  
+  #homologia persistente
+  
+  for (i in 1:length(lista_df)){
+    print(i)
+    data <- lista_df[[i]]
+    frames <- unique(data$Num_fotogramas)
+    
+    #cogemos muestra reducida
+    interval_time <- frames[seq(1, length(frames), by = salto)]
+    
+    homologydata <- data.frame(t = numeric(0), dimension = numeric(0), birth = numeric(0), death = numeric(0))
+      
+    for (time in interval_time){
+      mydata <- data %>% 
+      filter(Num_fotogramas == time) %>% 
+      dplyr::select(X,Y)
+    
+      newdata <- getIntervals(mydata, L, mymaxdimension = 1, mymaxscale,time)
+      homologydata <- rbind(homologydata,newdata)
+    }
+    
+    # Crear Betti Data
+    griddata <- turnIntervalsIntoGrid(homologydata, numepsilon,mymaxscale)
+    
+      #creamos los 4 tipos de las matrices de betti: b1, b0, b1 y b0 y carcteristica de euler
+    betti_0 <- griddata %>%
+    filter(dimension == 0) %>% 
+    dplyr::select(-c(dimension)) %>% 
+    pivot_wider(
+      names_from = t,
+      values_from = betticount
+    )
+    betti_0 <- betti_0[,-1]
+    
+  betti_1 <- griddata %>%
+    filter(dimension == 1) %>% 
+    dplyr:: select(-c(dimension)) %>% 
+    pivot_wider(
+      names_from = t,
+      values_from = betticount
+    )
+  
+    betti_1 <- betti_1[,-1]
+  
+    betti <- bind_rows(betti_0,betti_1)
+
+    betti_euler <- betti_0 - betti_1
+    
+    #guardamos las matrices de betti
+    
+    ruta_m1 <- "C:/Users/croca/OneDrive/Escritorio/b1_empujando_100/"
+    ruta_m0 <- "C:/Users/croca/OneDrive/Escritorio/b0_empujando_100/"
+    ruta_me <- "C:/Users/croca/OneDrive/Escritorio/euler_empujando_100/"
+    ruta_m <- "C:/Users/croca/OneDrive/Escritorio/b_empujando_100/"
+
+    #creamos las carpetas donde guardaremos las matrices
+    rutas <- c(ruta_m1,ruta_m0,ruta_me,ruta_m)
+
+    for (ruta in rutas) {
+      if (!dir.exists(ruta)) {
+        dir.create(ruta, recursive = TRUE)
+      }
+    }
+    
+    write.csv(betti_0, paste0(ruta_m0,"mb0_",ev,"_",i,".csv"), row.names = FALSE)
+    write.csv(betti_1, paste0(ruta_m1,"mb1_",ev,"_",i,".csv"), row.names = FALSE)
+    write.csv(betti_euler, paste0(ruta_me,"mbe_",ev,"_",i,".csv"), row.names = FALSE)
+    write.csv(betti, paste0(ruta_m,"mb_",ev,"_",i,".csv"), row.names = FALSE)
+}
+}
+```
+
+## PARA UN FRAME (Curvas de Betti)
+#Se recoge la matriz entera de toda la evacuación con todos los frames (salto = 1)
+ 
+```{r}
+
+salto <- 1
+
+## EMPUJANDO
+
+num_id <- head(unique(data_empujando$id), 3)  #cogemos solo 3
+
+for (ev in num_id){
+  print(ev)
+  
+  data <- data_archivos_total_delimitado %>% filter(id == ev)
+  
+  #homologia persistente
+
+    frames <- unique(data$Num_fotogramas)
+    
+    #cogemos muestra reducida
+    interval_time <- frames[seq(1, length(frames), by = salto)]
+    
+    homologydata <- data.frame(t = numeric(0), dimension = numeric(0), birth = numeric(0), death = numeric(0))
+      
+    for (time in interval_time){
+      mydata <- data %>% 
+      filter(Num_fotogramas == time) %>% 
+      dplyr::select(X,Y)
+    
+      newdata <- getIntervals(mydata, L, mymaxdimension = 1, mymaxscale,time)
+      homologydata <- rbind(homologydata,newdata)
+    }
+    
+    # Crear Betti Data
+    griddata <- turnIntervalsIntoGrid(homologydata, numepsilon,mymaxscale)
+    
+      #creamos las matrices de betti
+    betti_0 <- griddata %>%
+    filter(dimension == 0) %>% 
+    dplyr::select(-c(dimension)) %>% 
+    pivot_wider(
+      names_from = t,
+      values_from = betticount
+    )
+    betti_0 <- betti_0[,-1]
+    
+    betti_1 <- griddata %>%
+    filter(dimension == 1) %>% 
+    dplyr:: select(-c(dimension)) %>% 
+    pivot_wider(
+      names_from = t,
+      values_from = betticount
+    )
+  
+    betti_1 <- betti_1[,-1]
+  
+    betti_euler <- betti_0 - betti_1
+
+    betti <- bind_rows(betti_0,betti_1)
+
+
+    
+    #guardamos las matrices de betti
+    
+    ruta_m1 <- "C:/Users/croca/OneDrive/Escritorio/b1_empujando_frame/"
+    ruta_m0 <- "C:/Users/croca/OneDrive/Escritorio/b0_empujando_frame/"
+    ruta_me <- "C:/Users/croca/OneDrive/Escritorio/be_empujando_frame/"
+    ruta_m <-"C:/Users/croca/OneDrive/Escritorio/b_empujando_frame/"
+    
+    #creamos las carpetas donde guardaremos las matrices
+    rutas <- c(ruta_m1,ruta_m0,ruta_me,ruta_m)
+
+    for (ruta in rutas) {
+      if (!dir.exists(ruta)) {
+        dir.create(ruta, recursive = TRUE)
+      }
+    }
+    
+    write.csv(betti_0, paste0(ruta_m0,"mb0_",ev,".csv"), row.names = FALSE)
+    write.csv(betti_1, paste0(ruta_m1,"mb1_",ev,".csv"), row.names = FALSE)
+    write.csv(betti_euler, paste0(ruta_me,"mbe_",ev,".csv"), row.names = FALSE)
+    write.csv(betti, paste0(ruta_m,"mb_",ev,".csv"), row.names = FALSE)
+
+}
+## SIN EMPUJAR
+
+num_id <- head(unique(data_sin_empujar$id), 3)  #cogemos solo 3
+
+for (ev in num_id){
+  print(ev)
+  
+  data <- data_archivos_total_delimitado %>% filter(id == ev)
+  
+  #homologia persistente
+
+    frames <- unique(data$Num_fotogramas)
+    
+    #cogemos muestra reducida
+    interval_time <- frames[seq(1, length(frames), by = salto)]
+    
+    homologydata <- data.frame(t = numeric(0), dimension = numeric(0), birth = numeric(0), death = numeric(0))
+      
+    for (time in interval_time){
+      mydata <- data %>% 
+      filter(Num_fotogramas == time) %>% 
+      dplyr::select(X,Y)
+    
+      newdata <- getIntervals(mydata, L, mymaxdimension = 1, mymaxscale,time)
+      homologydata <- rbind(homologydata,newdata)
+    }
+    
+    # Crear Betti Data
+    griddata <- turnIntervalsIntoGrid(homologydata, numepsilon,mymaxscale)
+    
+      #creamos las matrices de betti
+    betti_0 <- griddata %>%
+    filter(dimension == 0) %>% 
+    dplyr::select(-c(dimension)) %>% 
+    pivot_wider(
+      names_from = t,
+      values_from = betticount
+    )
+    betti_0 <- betti_0[,-1]
+    
+    betti_1 <- griddata %>%
+    filter(dimension == 1) %>% 
+    dplyr:: select(-c(dimension)) %>% 
+    pivot_wider(
+      names_from = t,
+      values_from = betticount
+    )
+  
+    betti_1 <- betti_1[,-1]
+  
+    betti_euler <- betti_0 - betti_1
+
+    betti <- bind_rows(betti_0,betti_1)
+
+    #guardamos las matrices de betti
+    
+    ruta_m1 <- "C:/Users/croca/OneDrive/Escritorio/b1_sin_empujar_frame/"
+    ruta_m0 <- "C:/Users/croca/OneDrive/Escritorio/b0_sin_empujar_frame/"
+    ruta_me <- "C:/Users/croca/OneDrive/Escritorio/be_sin_empujar_frame/"
+    ruta_m <-"C:/Users/croca/OneDrive/Escritorio/b_sin_empujar_frame/"
+    
+    #creamos las carpetas donde guardaremos las matrices
+    rutas <- c(ruta_m1,ruta_m0,ruta_me,ruta_m)
+
+    for (ruta in rutas) {
+      if (!dir.exists(ruta)) {
+        dir.create(ruta, recursive = TRUE)
+      }
+    }
+    
+    write.csv(betti_0, paste0(ruta_m0,"mb0_",ev,".csv"), row.names = FALSE)
+    write.csv(betti_1, paste0(ruta_m1,"mb1_",ev,".csv"), row.names = FALSE)
+    write.csv(betti_euler, paste0(ruta_me,"mbe_",ev,".csv"), row.names = FALSE)
+    write.csv(betti, paste0(ruta_m,"mb_",ev,".csv"), row.names = FALSE)
+
+}
+
+```
+
+
+
+
+
