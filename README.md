@@ -5,5 +5,5 @@ Este repositorio contiene implementaciones tanto con R, para la construcción de
 ## Contenido
 
 - `R_crockerplots.zip`: Contiene el primer programa con su `README.md` explicativo y sus funciones externas.
-- `ML_crockerplots.zip`: Contiene dos programas con sus `README.md` explicativos de los crocker plots y las curvas de betti.
+- `ML_crockerplots.zip`: Contiene dos programas con su `README.md` explicativo.
 
